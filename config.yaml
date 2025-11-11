@@ -1,0 +1,6 @@
+hyperparams:
+  anisotropy_table: ./ESTRO/nucletron_mhdr-v2_F.xlsx
+  radial_table: ./ESTRO/nucletron_mhdr-v2_gL.xlsx
+run:
+  data-root: /mnt/d/PRV/GYN_Geneva_wo_Needles
+  case: Case6
