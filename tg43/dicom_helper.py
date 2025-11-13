@@ -487,4 +487,6 @@ def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo]) -
                 indices.append(idx)
             except RuntimeError:
                 continue
+
+    indices = list(set(indices)) 
     return np.asarray(indices, dtype=int)
