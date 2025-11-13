@@ -9,20 +9,7 @@ DEFAULT_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
 
 def configure_logging(level: int = logging.INFO, *, log_format: Optional[str] = None) -> logging.Logger:
-    """Configure the root logger with a sensible default format.
-
-    Parameters
-    ----------
-    level : int, optional
-        Logging level applied to the root logger. Defaults to ``logging.INFO``.
-    log_format : str, optional
-        Custom format string. When omitted ``DEFAULT_FORMAT`` is used.
-
-    Returns
-    -------
-    logging.Logger
-        Root logger after configuration.
-    """
+    """Setup the root logger with the requested level/format and return it."""
 
     root_logger = logging.getLogger()
     if not root_logger.handlers:

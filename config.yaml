@@ -1,6 +1,9 @@
 hyperparams:
   anisotropy_table: ./ESTRO/nucletron_mhdr-v2_F.xlsx
   radial_table: ./ESTRO/nucletron_mhdr-v2_gL.xlsx
+  dose_max_cgy: 6000
+  dwell_time_mode: "perturb"
+  scale: 0.1
 models:
   dinov3: "facebook/dinov3-vitb16-pretrain-lvd1689m"
 run:

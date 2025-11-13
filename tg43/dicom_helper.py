@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+import json
 import pydicom
 from pydicom.uid import generate_uid
 import SimpleITK as sitk
@@ -12,12 +13,7 @@ import SimpleITK as sitk
 
 @dataclass
 class ChannelInfo:
-    """Lightweight container for dwell control points in a single channel.
-
-    Physical positions are stored in centimetres to align with the TG-43
-    implementation, while time weights, strengths, and relative positions are
-    captured as numpy arrays for vectorised downstream processing.
-    """
+    """Per-channel dwell metadata (positions, weights, relative offsets, strengths)."""
 
     setup_number: int
     channel_number: int
@@ -33,41 +29,50 @@ def load_ct_volume(
     ct_dir: Path | str,
     series_uid: Optional[str] = None,
     orient_to: Optional[str] = None,
-) -> Tuple[sitk.Image, np.ndarray, Dict[str, Any]]:
-    """Load a DICOM CT series into a SimpleITK volume.
-
-    The series is optionally reoriented, and the resulting SimpleITK image,
-    NumPy array, and geometry metadata (spacing, origin, direction, size) are
-    returned for downstream use. All metadata values remain in millimetres.
-
-    Parameters
-    ----------
-    ct_dir : str or Path
-        Directory containing the DICOM instances for a CT series.
-    series_uid : str, optional
-        SeriesInstanceUID to load when multiple series are present.
-    orient_to : str, optional
-        Target DICOM orientation code (for example ``"RAS"``) to enforce.
-
-    Returns
-    -------
-    tuple[sitk.Image, numpy.ndarray, dict]
-        The SimpleITK image, voxel array, and metadata for spacing, origin,
-        direction, and size.
-
-    Raises
-    ------
-    FileNotFoundError
-        If ``ct_dir`` does not exist.
-    RuntimeError
-        If the directory does not contain a readable CT series.
-    ValueError
-        If ``series_uid`` is provided but not found in the directory.
-    """
+    use_cache: bool = True,
+    nii_name: str = "ct_volume.nii.gz",
+    json_name: str = "ct_metadata.json",
+    return_numpy: bool = True,
+) -> Tuple[sitk.Image, Optional[np.ndarray], Dict[str, Any]]:
+    """Load a CT series (or cached NIfTI/JSON) and return the image, optional array, and metadata."""
     ct_dir = Path(ct_dir)
     if not ct_dir.exists():
         raise FileNotFoundError(f"CT directory not found: {ct_dir}")
 
+    nii_path = ct_dir / nii_name
+    json_path = ct_dir / json_name
+
+    # --- Helper: build ct_metadata from sitk.Image ---
+    def _meta_from_img(img: sitk.Image, source: str) -> Dict[str, Any]:
+        return {
+            "spacing": img.GetSpacing(),
+            "origin": img.GetOrigin(),
+            "direction": img.GetDirection(),
+            "size": img.GetSize(),
+            "source": source,
+        }
+
+    # --- Case 1: Cache hit (both files exist) ---
+    if use_cache:
+        if nii_path.exists() and json_path.exists():
+            ct_image = sitk.ReadImage(str(nii_path))
+            if orient_to:
+                orienter = sitk.DICOMOrientImageFilter()
+                orienter.SetDesiredCoordinateOrientation(orient_to)
+                ct_image = orienter.Execute(ct_image)
+
+            ct_array = sitk.GetArrayFromImage(ct_image).astype(np.int16) if return_numpy else None
+            ct_metadata = _meta_from_img(ct_image, source="cache")
+            # (Optional) read extra fields from JSON if you stored any
+            try:
+                with open(json_path, "r") as f:
+                    extra = json.load(f)
+                ct_metadata.update({k: v for k, v in extra.items() if k not in ct_metadata})
+            except Exception:
+                pass
+            return ct_image, ct_array, ct_metadata
+
+    # --- Case 2: Cache miss -> read DICOM, then write cache ---
     reader = sitk.ImageSeriesReader()
     series_ids = reader.GetGDCMSeriesIDs(str(ct_dir))
     if not series_ids:
@@ -93,37 +98,22 @@ def load_ct_volume(
         orienter.SetDesiredCoordinateOrientation(orient_to)
         ct_image = orienter.Execute(ct_image)
 
-    ct_array = sitk.GetArrayFromImage(ct_image).astype(np.int16)
-    ct_metadata = {
-        "spacing": ct_image.GetSpacing(),
-        "origin": ct_image.GetOrigin(),
-        "direction": ct_image.GetDirection(),
-        "size": ct_image.GetSize(),
-    }
+    if use_cache: 
+        # Save NIfTI cache (geometry is embedded in the header)
+        sitk.WriteImage(ct_image, str(nii_path))
+
+        # Save JSON sidecar (store whatever you need beyond geometry)
+        ct_metadata = _meta_from_img(ct_image, source="dicom->cache")
+        # You can add DICOM identifiers for traceability if desired:
+        # e.g., ct_metadata["SeriesInstanceUID"] = chosen_uid
+        with open(json_path, "w") as f:
+            json.dump(ct_metadata, f, indent=2)
+
+    ct_array = sitk.GetArrayFromImage(ct_image).astype(np.int16) if return_numpy else None
     return ct_image, ct_array, ct_metadata
 
 def load_rtdose_volume(rtdose_path: Path | str) -> Tuple[sitk.Image, np.ndarray, Dict[str, Any]]:
-    """Load an RTDOSE dataset into a SimpleITK image.
-
-    Pixel data are scaled using ``DoseGridScaling`` and wrapped in a
-    SimpleITK image whose spacing/origin/direction mirror the RTDOSE tags. The
-    companion array is returned in gray for direct analysis.
-
-    Parameters
-    ----------
-    rtdose_path : str or Path
-        Location of the RTDOSE DICOM file on disk.
-
-    Returns
-    -------
-    tuple[sitk.Image, numpy.ndarray, dict]
-        The SimpleITK image, voxel array in gray, and geometry metadata.
-
-    Raises
-    ------
-    FileNotFoundError
-        If ``rtdose_path`` does not exist.
-    """
+    """Read an RTDOSE slice, apply ``DoseGridScaling``, and return the image, array, and geometry metadata."""
     rtdose_path = Path(rtdose_path)
     if not rtdose_path.exists():
         raise FileNotFoundError(f"RTDOSE file not found: {rtdose_path}")
@@ -156,9 +146,8 @@ def load_rtdose_volume(rtdose_path: Path | str) -> Tuple[sitk.Image, np.ndarray,
     dose_array = sitk.GetArrayFromImage(dose_image).astype(np.float32)
     dose_metadata = {
         "spacing": dose_image.GetSpacing(),
-        "origin": np.array(dose_image.GetOrigin()),
+        "origin": dose_image.GetOrigin(),
         "direction": dose_image.GetDirection(),
-        "offsets": np.array(gfv),
         "size": dose_image.GetSize(),
     }
     return dose_image, dose_array, dose_metadata
@@ -168,26 +157,7 @@ def resample_to_reference(
     reference: sitk.Image,
     default_value: float = 0.0,
 ) -> Tuple[sitk.Image, np.ndarray, Dict[str, Any]]:
-    """Resample a SimpleITK image onto a reference grid.
-
-    Uses linear interpolation and copies the reference geometry so the returned
-    image and NumPy array align with downstream CT volumes. Voxels outside the
-    source image footprint are filled with ``default_value``.
-
-    Parameters
-    ----------
-    image : SimpleITK.Image
-        Image that needs to be resampled.
-    reference : SimpleITK.Image
-        Reference geometry that defines the desired spacing and origin.
-    default_value : float, optional
-        Fill value for voxels that map outside the source extent.
-
-    Returns
-    -------
-    tuple[sitk.Image, numpy.ndarray, dict]
-        The resampled image, voxel array, and accompanying metadata.
-    """
+    """Resample ``image`` onto ``reference`` using linear interpolation and copy its geometry."""
     resampled_image = sitk.Resample(
         image,
         reference,
@@ -212,31 +182,7 @@ def resample_to_spacing(
     default_value: float = 0.0,
     interpolator=sitk.sitkLinear,
 ) -> Tuple[sitk.Image, np.ndarray, Dict[str, Any]]:
-    """Resample a SimpleITK image onto a grid with user-defined spacing.
-
-    Parameters
-    ----------
-    image : SimpleITK.Image
-        Image that needs to be resampled.
-    spacing : float or Sequence[float]
-        Desired voxel spacing in millimetres. When a single float is provided,
-        it is applied uniformly across all dimensions.
-    default_value : float, optional
-        Fill value for voxels that map outside the source extent.
-    interpolator : SimpleITK interpolator enum, optional
-        Interpolator passed through to ``sitk.Resample``.
-
-    Returns
-    -------
-    tuple[sitk.Image, numpy.ndarray, dict]
-        The resampled image, voxel array, and accompanying metadata.
-
-    Raises
-    ------
-    ValueError
-        If the spacing values are non-positive or do not match the image
-        dimensionality.
-    """
+    """Resample ``image`` to the requested isotropic or per-axis spacing."""
     dimension = image.GetDimension()
 
     if np.isscalar(spacing):
@@ -284,30 +230,7 @@ def resample_to_spacing(
     return resampled_image, resampled_array, resampled_metadata
 
 def load_rtplan_by_channel(rtplan_path: Path | str) -> List[ChannelInfo]:
-    """Extract dwell control points from an RTPLAN by channel.
-
-    Parses brachytherapy application setups, folds in overrides from the
-    FractionGroupSequence, and yields ``ChannelInfo`` records containing dwell
-    positions, cumulative weights, and per-control-point strengths. Channels
-    are returned in the order they appear in the RTPLAN dataset.
-
-    Parameters
-    ----------
-    rtplan_path : str or Path
-        Path to the RTPLAN DICOM dataset.
-
-    Returns
-    -------
-    list[ChannelInfo]
-        Channel-wise dwell metadata including times, positions, and weights.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the RTPLAN file is missing.
-    ValueError
-        If the dataset cannot be read as DICOM.
-    """
+    """Parse an RTPLAN into per-channel dwell sequences with cumulative weights and strengths."""
 
     def _as_float(value: object) -> Optional[float]:
         try:
@@ -446,24 +369,7 @@ def save_rtplan_with_channels(
     update_uids: bool = True,
     anonymization: bool = True,
 ) -> None:
-    """Write a new RTPLAN DICOM with dwell times updated from ``channels``.
-
-    Parameters
-    ----------
-    template_path : str or Path
-        Source RTPLAN file used as the structural template.
-    output_path : str or Path
-        Destination filename for the updated RTPLAN.
-    channels : Sequence[ChannelInfo]
-        Channel descriptors containing cumulative dwell times (seconds).
-    update_uids : bool, optional
-        When ``True`` new SOP/Series instance UIDs are generated to avoid clashes.
-
-    Raises
-    ------
-    ValueError
-        If the RTPLAN structure does not match the supplied channel information.
-    """
+    """Copy an RTPLAN and overwrite dwell weights/times using ``channels`` (optionally anonymising/U-ID refreshing)."""
 
     template_path = Path(template_path)
     output_path = Path(output_path)
@@ -568,35 +474,17 @@ def save_rtplan_with_channels(
     ds.save_as(str(output_path))
 
 def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo]) -> np.ndarray:
-    """Convert dwell positions to CT voxel indices for QA plots.
-
-    Parameters
-    ----------
-    ct_image : SimpleITK.Image
-        CT image that defines the spatial index transform.
-    channels : list[ChannelInfo]
-        Dwell records whose physical positions are expressed in centimetres.
-
-    Returns
-    -------
-    numpy.ndarray
-        Array of shape ``(N, 3)`` containing continuous ``(z, y, x)`` indices
-        for the dwells that map inside the CT volume. Empty arrays are returned
-        when no positions fall inside the image bounds.
-    """
+    """Map dwell positions (cm) into CT voxel indices for quick QA plotting."""
  
-    indices: List[tuple[float, float, float]] = []
+    indices: List[tuple[int, int, int]] = []
     for channel in channels:
         for pos_cm in channel.positions_cm:
             if pos_cm is None:
                 continue
             try:
                 point_mm = tuple((pos_cm * 10.0).tolist())
-                # Use the continuous transform to retain sub-voxel precision and
-                # avoid the rounding artefacts of TransformPhysicalPointToIndex.
-                idx = ct_image.TransformPhysicalPointToContinuousIndex(point_mm)
-                indices.append(tuple(float(v) for v in idx))
+                idx = ct_image.TransformPhysicalPointToIndex(point_mm)
+                indices.append(idx)
             except RuntimeError:
                 continue
-    indices = list(set(indices))  # Remove duplicates
-    return np.asarray(indices, dtype=float)
+    return np.asarray(indices, dtype=int)

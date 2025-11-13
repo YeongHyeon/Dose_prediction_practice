@@ -18,11 +18,7 @@ except ImportError:  # pragma: no cover - runtime dependency noticed at call sit
 
 @dataclass
 class StructureInfo:
-    """Metadata describing one ROI entry from an RTSTRUCT dataset.
-
-    Stores the ROI number and frame-of-reference so related DICOM objects can
-    be cross-checked when rasterising.
-    """
+    """ROI metadata (number, name, frame UID) cached from the RTSTRUCT."""
 
     roi_number: int
     name: str
@@ -31,38 +27,13 @@ class StructureInfo:
 
 @dataclass
 class RTStructData:
-    """Loaded RTSTRUCT dataset accompanied by a name-indexed structure map.
-
-    ``structures`` maps ROI names to :class:`StructureInfo` entries for quick
-    lookups.
-    """
+    """RTSTRUCT dataset plus a convenience mapping of ROI name → StructureInfo."""
 
     dataset: pydicom.dataset.FileDataset
     structures: Dict[str, StructureInfo]
 
 def load_rtstruct(rtstruct_path: Path | str) -> RTStructData:
-    """Load an RTSTRUCT file and build a name → metadata lookup table.
-
-    ROI names are kept as stored in the dataset so downstream lookups remain
-    faithful to clinician-provided labels.
-
-    Parameters
-    ----------
-    rtstruct_path : Path or str
-        Path to an RTSTRUCT DICOM file on disk.
-
-    Returns
-    -------
-    RTStructData
-        Loaded dataset together with a name → info lookup table.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file does not exist.
-    ValueError
-        If the dataset does not contain any ``StructureSetROISequence`` entries.
-    """
+    """Load an RTSTRUCT file and build a name-indexed ROI lookup."""
 
     rtstruct_path = Path(rtstruct_path)
     if not rtstruct_path.exists():
@@ -88,18 +59,7 @@ def load_rtstruct(rtstruct_path: Path | str) -> RTStructData:
 
 
 def available_structures(rtstruct: RTStructData) -> List[str]:
-    """Return ROI names in insertion order from the RTSTRUCT dataset.
-
-    Parameters
-    ----------
-    rtstruct : RTStructData
-        Loaded RTSTRUCT dataset whose structures are listed.
-
-    Returns
-    -------
-    list[str]
-        ROI names stored in insertion order.
-    """
+    """Return ROI names in insertion order."""
 
     return list(rtstruct.structures.keys())
 
@@ -108,20 +68,7 @@ def _roi_contour_sequence(
     dataset: pydicom.dataset.FileDataset,
     roi_number: int,
 ) -> Optional[pydicom.dataset.Dataset]:
-    """Return the ROI contour sequence entry matching ``roi_number``.
-
-    Parameters
-    ----------
-    dataset : pydicom.dataset.FileDataset
-        RTSTRUCT dataset containing contour sequences.
-    roi_number : int
-        Identifier of the ROI whose contour is required.
-
-    Returns
-    -------
-    pydicom.dataset.Dataset or None
-        The matching contour sequence, or ``None`` when no match is found.
-    """
+    """Return the contour sequence referencing ``roi_number`` (if present)."""
 
     for roi_contour in getattr(dataset, "ROIContourSequence", []):
         if int(getattr(roi_contour, "ReferencedROINumber", -1)) == roi_number:
@@ -133,45 +80,14 @@ def _continuous_indices(
     image: sitk.Image,
     points_mm: np.ndarray,
 ) -> np.ndarray:
-    """Map contour points in millimetres to fractional image indices ``(x, y, z)``.
-
-    Parameters
-    ----------
-    image : SimpleITK.Image
-        Reference image defining the index space.
-    points_mm : numpy.ndarray
-        Array of shape ``(N, 3)`` containing contour points in millimetres.
-
-    Returns
-    -------
-    numpy.ndarray
-        Fractional index coordinates with shape ``(N, 3)``.
-    """
+    """Convert millimetre contour points into fractional image indices."""
 
     to_index = image.TransformPhysicalPointToContinuousIndex
     return np.asarray([to_index(tuple(point.tolist())) for point in points_mm], dtype=float)
 
 
 def _fill_polygon(indices_xy: np.ndarray, slice_shape: Tuple[int, int]) -> np.ndarray:
-    """Rasterise an index-space polygon onto a 2D slice mask using matplotlib.
-
-    Parameters
-    ----------
-    indices_xy : numpy.ndarray
-        Polygon vertices expressed in index space as ``(x, y)`` pairs.
-    slice_shape : tuple[int, int]
-        Target slice dimensions in ``(rows, cols)`` order.
-
-    Returns
-    -------
-    numpy.ndarray
-        Boolean mask describing the filled polygon on the target slice.
-
-    Raises
-    ------
-    RuntimeError
-        If matplotlib is not available.
-    """
+    """Rasterise an index-space polygon into a boolean slice mask via matplotlib."""
 
     if MplPath is None:
         raise RuntimeError(
@@ -207,33 +123,7 @@ def rasterise_structure(
     *,
     roi_numbers: Optional[Iterable[int]] = None,
 ) -> np.ndarray:
-    """Convert one or more RTSTRUCT ROIs into a boolean mask on ``reference_image``.
-
-    Parameters
-    ----------
-    rtstruct : RTStructData
-        Loaded RTSTRUCT data.
-    structure_name : str
-        Name of the ROI to rasterise. Ignored when ``roi_numbers`` is provided.
-    reference_image : SimpleITK.Image
-        CT or dose image defining the target geometry.
-    roi_numbers : Iterable[int], optional
-        Explicit ROI number selection. Use when one name maps to multiple ROI
-        numbers or to merge several structures. When omitted the ROI number
-        associated with ``structure_name`` is used.
-
-    Returns
-    -------
-    numpy.ndarray
-        Boolean array with shape ``(z, y, x)`` matching the reference image.
-
-    Raises
-    ------
-    KeyError
-        If ``structure_name`` is unknown and ``roi_numbers`` is not supplied.
-    RuntimeError
-        If contour polygons cannot be rasterised (missing matplotlib).
-    """
+    """Rasterise the requested ROI(s) onto ``reference_image`` and return a boolean mask."""
 
     size_x, size_y, size_z = reference_image.GetSize()
     mask = np.zeros((size_z, size_y, size_x), dtype=bool)
@@ -275,27 +165,7 @@ def rasterise_structure(
 
 
 def mask_to_image(mask: np.ndarray, reference_image: sitk.Image, *, value: int = 1) -> sitk.Image:
-    """Convert a boolean mask into a SimpleITK image aligned with ``reference_image``.
-
-    Parameters
-    ----------
-    mask : numpy.ndarray
-        Boolean mask arranged in ``(z, y, x)`` order.
-    reference_image : SimpleITK.Image
-        Image supplying spacing, origin, and direction metadata.
-    value : int, optional
-        Scalar multiplier applied to the mask when generating the image.
-
-    Returns
-    -------
-    SimpleITK.Image
-        Image mirroring the reference geometry with voxel values derived from the mask.
-
-    Raises
-    ------
-    ValueError
-        If the mask shape does not match the reference image dimensions.
-    """
+    """Wrap a ``(z, y, x)`` mask in a SimpleITK image that copies the reference geometry."""
 
     mask = np.asarray(mask, dtype=bool)
     if mask.shape != tuple(reversed(reference_image.GetSize())):

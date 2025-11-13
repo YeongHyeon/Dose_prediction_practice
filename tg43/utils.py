@@ -11,39 +11,14 @@ import pandas as pd
 EPSILON = 1e-6
 
 def min_max_normalization(array: np.ndarray) -> np.ndarray:
-    """Normalize values into ``[0, 1]`` while guarding against zero range.
-
-    Parameters
-    ----------
-    array : numpy.ndarray
-        Input values to be normalised.
-
-    Returns
-    -------
-    numpy.ndarray
-        Array with entries scaled into ``[0, 1]``. Constant inputs map to ones
-        thanks to a small epsilon in the numerator and denominator.
-    """
+    """Scale an array into ``[0, 1]`` with epsilon guards for constant inputs."""
 
     array = np.asarray(array, dtype=float)
 
     return (array - array.min() + EPSILON) / (array.max() - array.min() + EPSILON)
 
 def measure_l2_error(target: np.ndarray, compare: np.ndarray) -> np.ndarray:
-    """Return element-wise L2 error between ``target`` and ``compare`` arrays.
-
-    Parameters
-    ----------
-    target : numpy.ndarray
-        Reference values used to measure the deviation.
-    compare : numpy.ndarray
-        Values compared against ``target``.
-
-    Returns
-    -------
-    numpy.ndarray
-        Element-wise absolute difference matching the broadcasted shape of the inputs.
-    """
+    """Return the element-wise L2 error between ``target`` and ``compare``."""
 
     target = np.asarray(target, dtype=float)
     compare = np.asarray(compare, dtype=float)
@@ -54,15 +29,7 @@ def measure_l2_error(target: np.ndarray, compare: np.ndarray) -> np.ndarray:
 
 
 def save_dvh(dvh_map: Dict, path: Path | str) -> None:
-    """Persist DVH curves to a compressed ``.npz`` archive.
-
-    Parameters
-    ----------
-    dvh_map : dict
-        Mapping of structure name to DVH objects containing arrays to serialise.
-    path : str or Path
-        Basename used for the emitted ``.npz`` and ``.csv`` files (without extension).
-    """
+    """Persist DVH curves to both ``.npz`` (binary) and ``.csv`` snapshots."""
 
     dic_dvh = {}
     for name, dvh in dvh_map.items():
