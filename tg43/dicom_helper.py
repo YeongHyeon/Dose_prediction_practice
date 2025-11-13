@@ -580,20 +580,23 @@ def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo]) -
     Returns
     -------
     numpy.ndarray
-        Array of shape ``(N, 3)`` containing ``(z, y, x)`` indices for the
-        dwells that map inside the CT volume. Empty arrays are returned when no
-        positions fall inside the image bounds.
+        Array of shape ``(N, 3)`` containing continuous ``(z, y, x)`` indices
+        for the dwells that map inside the CT volume. Empty arrays are returned
+        when no positions fall inside the image bounds.
     """
  
-    indices: List[tuple[int, int, int]] = []
+    indices: List[tuple[float, float, float]] = []
     for channel in channels:
         for pos_cm in channel.positions_cm:
             if pos_cm is None:
                 continue
             try:
                 point_mm = tuple((pos_cm * 10.0).tolist())
-                idx = ct_image.TransformPhysicalPointToIndex(point_mm)
-                indices.append(idx)
+                # Use the continuous transform to retain sub-voxel precision and
+                # avoid the rounding artefacts of TransformPhysicalPointToIndex.
+                idx = ct_image.TransformPhysicalPointToContinuousIndex(point_mm)
+                indices.append(tuple(float(v) for v in idx))
             except RuntimeError:
                 continue
-    return np.asarray(indices, dtype=int)
+    indices = list(set(indices))  # Remove duplicates
+    return np.asarray(indices, dtype=float)
