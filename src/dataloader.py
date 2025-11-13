@@ -23,6 +23,11 @@ def load_case(
     ## RTDOSE
     dose_array = load_dose_array(paths['dose'], ct_image, rt_channels, cfg)
 
+
+    ## Slice extraction
+    print(ct_array.shape)
+    print(dose_array.shape)
+    print(mask_array.shape)
     ct_slices, dose_slices, mask_slices, dwell_positions = extract_slices_by_dwell_positions(
         ct_image=ct_image,
         ct_array=ct_array,
@@ -39,7 +44,6 @@ def load_dose_array(
     rt_channels,
     cfg: Dict[str, Any],
 ):
-    print(cfg["hyperparams"]["dwell_time_mode"])
     mode = cfg["hyperparams"]["dwell_time_mode"]
     scale = cfg["hyperparams"]["scale"]
 
@@ -68,7 +72,7 @@ def load_dose_array(
         max_distance_cm=10.0,
     )
 
-    return dose_array
+    return dose_array.resampled_array
 
 
 def load_mask_array(
@@ -89,6 +93,7 @@ def load_mask_array(
         mask_tmp = chelp.rasterise_structure(rtstruct, name_structure, ct_image)
         mask_array[..., idx_structure] = mask_tmp.astype(np.float32)
 
+    return mask_array
 
 def extract_slices_by_dwell_positions(
     ct_image,
