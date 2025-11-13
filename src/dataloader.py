@@ -113,7 +113,7 @@ def extract_slices_by_dwell_positions(
     ct_slices = []
     dose_slices = []
     mask_slices = []
-    dwell_positions = dhelp.extract_dwell_positions(ct_image, rt_channels)
+    dwell_positions = dhelp.extract_dwell_positions(ct_image, rt_channels, unique=True)
     for _, dwell_position in enumerate(dwell_positions):
         ct_slices.append(get_slice_by_dwell(ct_array, dwell_position, axis=0))
         dose_slices.append(get_slice_by_dwell(dose_array, dwell_position, axis=0))

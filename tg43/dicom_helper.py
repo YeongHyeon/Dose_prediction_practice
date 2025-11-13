@@ -473,7 +473,7 @@ def save_rtplan_with_channels(
 
     ds.save_as(str(output_path))
 
-def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo]) -> np.ndarray:
+def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo], unique: bool = False) -> np.ndarray:
     """Map dwell positions (cm) into CT voxel indices for quick QA plotting."""
  
     indices: List[tuple[int, int, int]] = []
@@ -488,5 +488,6 @@ def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo]) -
             except RuntimeError:
                 continue
 
-    indices = list(set(indices)) 
+    if unique:
+        indices = list(set(indices)) 
     return np.asarray(indices, dtype=int)
