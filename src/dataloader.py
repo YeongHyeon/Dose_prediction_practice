@@ -1,6 +1,8 @@
 import copy
 import numpy as np
 
+from skimage.feature import peak_local_max
+
 import tg43.dicom_helper as dhelp
 import tg43.contour_helper as chelp
 import tg43.dose_calculation as dosecal
@@ -25,10 +27,7 @@ def load_case(
 
 
     ## Slice extraction
-    print(ct_array.shape)
-    print(dose_array.shape)
-    print(mask_array.shape)
-    ct_slices, dose_slices, mask_slices, dwell_positions = extract_slices_by_dwell_positions(
+    ct_slices, dose_slices, mask_slices, dwell_positions, dwell_candidates = extract_slices_by_dwell_positions(
         ct_image=ct_image,
         ct_array=ct_array,
         dose_array=dose_array,
@@ -41,7 +40,8 @@ def load_case(
         "dose_slices":dose_slices, 
         "mask_slices":mask_slices, 
         "mask_names":mask_names, 
-        "dwell_positions":dwell_positions
+        "dwell_positions":dwell_positions,
+        "dwell_candidates":dwell_candidates
     }
 
 def load_dose_array(
@@ -116,14 +116,16 @@ def extract_slices_by_dwell_positions(
     dwell_positions = dhelp.extract_dwell_positions(ct_image, rt_channels, unique=True)
     for _, dwell_position in enumerate(dwell_positions):
         ct_slices.append(get_slice_by_dwell(ct_array, dwell_position, axis=0))
-        dose_slices.append(get_slice_by_dwell(dose_array, dwell_position, axis=0))
+        dose_slice_tmp = get_slice_by_dwell(dose_array, dwell_position, axis=0)
+        dose_slices.append(dose_slice_tmp)
+        dwell_candidates = extract_peak_dose_points(dose_slice_tmp)
         mask_slices.append(get_slice_by_dwell(mask_array, dwell_position, axis=0))
 
     ct_slices = np.array(ct_slices)
     dose_slices = np.array(dose_slices)
     mask_slices = np.array(mask_slices)
 
-    return ct_slices, dose_slices, mask_slices, dwell_positions
+    return ct_slices, dose_slices, mask_slices, dwell_positions, dwell_candidates
 
 def get_slice_by_dwell(ct_array: np.ndarray, dwell_position: np.ndarray, axis: int = 0):
     """
@@ -207,3 +209,22 @@ def adjust_channel_dwells(
 
     dosecal.rebuild_channels(rt_channels, updated)
     return dosecal.rebuild_channels(rt_channels, updated)
+
+def extract_peak_dose_points(
+    dose_slice: np.ndarray,
+    min_distance: int = 1,
+    threshold_rel: float = 0.1
+):
+
+    coords = peak_local_max(
+        dose_slice,
+        min_distance=min_distance,
+        threshold_rel=threshold_rel,
+        exclude_border=False
+    )
+
+    values = dose_slice[coords[:, 0], coords[:, 1]]
+    order = np.argsort(values)[::-1]
+    peaks_yx = coords[order]
+    peaks_xy = peaks_yx[:, ::-1]
+    return peaks_xy
