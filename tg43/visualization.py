@@ -9,7 +9,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 
-
+import tg43.utils as utils
 
 def plot_dwell_times_comparison(
     original_dwells: Sequence[Any],
@@ -211,7 +211,7 @@ def plot_dose_distribution(
         If ``save_dir`` is provided without ``save_name``.
     """
 
-    dose_overlay = np.clip(dose_array, 0, dose_max) if dose_max is not None else dose_array
+    dose_overlay = utils.dose_clip(dose_array, 0, dose_max) if dose_max is not None else dose_array
     # np.save(save_dir / f"{save_name}.npy", dose_overlay)
 
     x_ticks = range(ct_metadata["size"][0])

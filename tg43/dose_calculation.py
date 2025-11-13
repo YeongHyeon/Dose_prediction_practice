@@ -13,10 +13,10 @@ import numpy as np
 import pandas as pd
 import SimpleITK as sitk
 
-from src.logging_utils import get_logger
+from tg43.logging_utils import get_logger
 
-import src.utils as utils
-import src.contour_helper as chelp
+import tg43.utils as utils
+import tg43.contour_helper as chelp
 
 EPSILON = 1e-6
 XLSX_NAMESPACE_MAP = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -24,11 +24,11 @@ DEFAULT_DVH_STRUCTURES = ("Bladder", "Rectum", "Sigmoid", "Bowel", "HR-CTV")
 logger = get_logger(__name__)
 
 try:
-    import src.dicom_helper as dhelp  # type: ignore
+    import tg43.dicom_helper as dhelp  # type: ignore
 except ImportError as exc:  # pragma: no cover - utils lives next to this module
     raise ImportError("utils.py must be importable alongside dosecal.py") from exc
 
-from src.dicom_helper import ChannelInfo
+from tg43.dicom_helper import ChannelInfo
 
 
 @dataclass
@@ -712,7 +712,7 @@ def calculate_tg43_rectilinear_dose(
     """Compute the TG-43 dose grid and convert it to a SimpleITK image.
 
     TG-43 tables are loaded from disk, dwell metadata from
-    :func:`src.dicom_helper.load_rtplan_by_channel` is flattened, and the
+    :func:`tg43.dicom_helper.load_rtplan_by_channel` is flattened, and the
     kernel is integrated on a coarse rectilinear grid before being wrapped in a
     SimpleITK image.
 
@@ -788,7 +788,7 @@ def calculate_and_resample_to_ct(
     """Compute TG-43 dose and resample it to the CT reference frame.
 
     The rectilinear dose grid is generated first, then resampled via
-    :func:`src.dicom_helper.resample_to_reference` so that the final volume
+    :func:`tg43.dicom_helper.resample_to_reference` so that the final volume
     aligns exactly with the CT geometry. The coarse grid bounds are expanded to
     include the CT extent, preserving low-dose coverage after resampling.
 

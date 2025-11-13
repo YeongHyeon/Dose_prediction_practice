@@ -18,7 +18,7 @@ def load_case(
     rt_channels = dhelp.load_rtplan_by_channel(paths["plan"])
 
     ## RTSTRUCT
-    mask_array = load_mask_array(paths["struct"], ct_image, ct_array)
+    mask_array, mask_names = load_mask_array(paths["struct"], ct_image, ct_array)
 
     ## RTDOSE
     dose_array = load_dose_array(paths['dose'], ct_image, rt_channels, cfg)
@@ -36,7 +36,13 @@ def load_case(
         rt_channels=rt_channels,
     )
 
-    return ct_slices, dose_slices, mask_slices, dwell_positions
+    return {
+        "ct_slices":ct_slices, 
+        "dose_slices":dose_slices, 
+        "mask_slices":mask_slices, 
+        "mask_names":mask_names, 
+        "dwell_positions":dwell_positions
+    }
 
 def load_dose_array(
     paths: Dict[str, str],
@@ -93,7 +99,7 @@ def load_mask_array(
         mask_tmp = chelp.rasterise_structure(rtstruct, name_structure, ct_image)
         mask_array[..., idx_structure] = mask_tmp.astype(np.float32)
 
-    return mask_array
+    return mask_array, structures
 
 def extract_slices_by_dwell_positions(
     ct_image,

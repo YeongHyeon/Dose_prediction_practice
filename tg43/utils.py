@@ -41,3 +41,7 @@ def save_dvh(dvh_map: Dict, path: Path | str) -> None:
 
     np.savez_compressed(f"{path}.npz", **dic_dvh)
     pd.DataFrame.from_dict(dic_dvh).to_csv(f"{path}.csv", index=False)
+
+def dose_clip(dose_array, dose_max=None):
+
+    return np.clip(dose_array, 0, dose_max) if dose_max is not None else dose_array
