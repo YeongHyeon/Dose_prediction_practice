@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import json
@@ -229,8 +229,12 @@ def resample_to_spacing(
     }
     return resampled_image, resampled_array, resampled_metadata
 
-def load_rtplan_by_channel(rtplan_path: Path | str) -> List[ChannelInfo]:
-    """Parse an RTPLAN into per-channel dwell sequences with cumulative weights and strengths."""
+def load_rtplan_by_channel(rtplan_path: Path | str, *, all_points: bool = False) -> Union[List[ChannelInfo], Tuple[List[ChannelInfo], Dict[str, Any]]]:
+    """Parse an RTPLAN into per-channel dwell sequences with cumulative weights and strengths.
+
+    When ``all_points`` is ``True`` the function also returns auxiliary point
+    descriptors (for example DoseReferenceSequence entries such as Point A/B).
+    """
 
     def _as_float(value: object) -> Optional[float]:
         try:
@@ -239,6 +243,33 @@ def load_rtplan_by_channel(rtplan_path: Path | str) -> List[ChannelInfo]:
             return float(value)
         except Exception:
             return None
+
+    def _extract_reference_points(dataset: pydicom.dataset.Dataset) -> List[Dict[str, Any]]:
+        points: List[Dict[str, Any]] = []
+        for idx, ref in enumerate(getattr(dataset, "DoseReferenceSequence", [])):
+            coords = getattr(ref, "DoseReferencePointCoordinates", None)
+            if coords is None:
+                continue
+            coords_cm = np.asarray([_as_float(v) or 0.0 for v in coords], dtype=float) / 10.0
+            number_val = _as_float(getattr(ref, "DoseReferenceNumber", None))
+            roi_val = _as_float(getattr(ref, "ReferencedROINumber", None))
+            point_entry: Dict[str, Any] = {
+                "number": int(number_val) if number_val is not None else idx + 1,
+                "description": str(getattr(ref, "DoseReferenceDescription", "") or "").strip(),
+                "type": str(getattr(ref, "DoseReferenceType", "") or "").strip(),
+                "positions_cm": coords_cm,
+                "roi_number": int(roi_val) if roi_val is not None else None,
+                "target_prescription_dose_Gy": _as_float(getattr(ref, "TargetPrescriptionDose", None)),
+                "target_minimum_dose_Gy": _as_float(getattr(ref, "TargetMinimumDose", None)),
+                "target_maximum_dose_Gy": _as_float(getattr(ref, "TargetMaximumDose", None)),
+                "under_dose_volume_fraction": _as_float(getattr(ref, "TargetUnderDoseVolumeFraction", None)),
+                "over_dose_volume_fraction": _as_float(getattr(ref, "TargetOverdoseVolumeFraction", None)),
+            }
+            uid = getattr(ref, "DoseReferenceUID", None)
+            if uid:
+                point_entry["uid"] = str(uid)
+            points.append(point_entry)
+        return points
 
     rtplan_path = Path(rtplan_path)
     if not rtplan_path.exists():
@@ -358,7 +389,13 @@ def load_rtplan_by_channel(rtplan_path: Path | str) -> List[ChannelInfo]:
                 )
             )
 
-    return channels
+    if not all_points:
+        return channels
+
+    aux_points = {
+        "dose_reference_points": _extract_reference_points(ds),
+    }
+    return channels, aux_points
 
 
 def save_rtplan_with_channels(
@@ -475,9 +512,10 @@ def save_rtplan_with_channels(
 
 def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo], unique: bool = False) -> np.ndarray:
     """Map dwell positions (cm) into CT voxel indices for quick QA plotting."""
- 
-    indices: List[tuple[int, int, int]] = []
-    for channel in channels:
+
+    positions = {"position":[], "channel":[]}
+    for _, channel in enumerate(channels):
+        indices: List[tuple[int, int, int]] = []
         for pos_cm in channel.positions_cm:
             if pos_cm is None:
                 continue
@@ -487,7 +525,10 @@ def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo], u
                 indices.append(idx)
             except RuntimeError:
                 continue
+        if unique:
+            indices = list(set(indices))
 
-    if unique:
-        indices = list(set(indices)) 
-    return np.asarray(indices, dtype=int)
+        positions["position"].extend(indices)
+        positions["channel"].extend([channel.channel_number] * len(indices))
+    
+    return positions

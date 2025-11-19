@@ -681,6 +681,100 @@ def compute_tg43_dose_on_grid(
     }
     return dose_volume, metadata
 
+def compute_tg43_dose_at_points(
+    dwells: Sequence[DwellPoint],
+    points_cm: np.ndarray,
+    tables: TG43TableSet,
+    *,
+    max_distance_cm: Optional[float] = None,
+    dwell_time_override_s: Optional[float] = None,
+) -> np.ndarray:
+    """Evaluate TG-43 dose contributions at arbitrary reference points.
+
+    The computation mirrors :func:`compute_tg43_dose_on_grid` but restricts the
+    evaluation to the supplied physical coordinates. This is useful when
+    probing classical Point-A/B references, or when solving for dwell times
+    that yield a prescribed dose at a handful of QA markers.
+
+    Parameters
+    ----------
+    dwells : Sequence[DwellPoint]
+        Dwell points with timing and source strength data.
+    points_cm : array-like
+        Array of shape ``(N, 3)`` containing reference point coordinates in
+        centimetres.
+    tables : TG43TableSet
+        Interpolation tables for anisotropy and radial dose functions.
+    max_distance_cm : float, optional
+        Optional cut-off that skips dwells further than ``max_distance_cm`` away
+        from every reference point.
+    dwell_time_override_s : float, optional
+        When provided, each dwell uses this uniform dwell time instead of the
+        value stored in ``dwell_time_s``. Passing ``1.0`` is a convenient way
+        to retrieve dose-per-second rates.
+
+    Returns
+    -------
+    numpy.ndarray
+        Dose in Gy for each reference point after accounting for the dwell
+        times (or override) and source strengths.
+    """
+    pts = np.asarray(points_cm, dtype=float)
+    if pts.ndim == 1:
+        if pts.size != 3:
+            raise ValueError("points_cm must have length 3 when passing a single reference point.")
+        pts = pts[np.newaxis, :]
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError("points_cm must be shaped (N, 3) in centimetres.")
+    if pts.size == 0:
+        return np.zeros((0,), dtype=np.float32)
+
+    lambda_Gy_per_s_per_U = tables.lambda_Gy_per_h_U / 3600.0
+    override_time = float(dwell_time_override_s) if dwell_time_override_s is not None else None
+    dose_Gy = np.zeros(pts.shape[0], dtype=np.float64)
+
+    for dwell in dwells:
+        dwell_time = override_time if override_time is not None else dwell.dwell_time_s
+        strength_time_U_s = dwell.source_strength_U * dwell_time
+        if strength_time_U_s <= 0.0:
+            continue
+
+        displacement_cm = pts - dwell.position_cm[np.newaxis, :]
+        radial_distance_cm = np.linalg.norm(displacement_cm, axis=1)
+
+        if max_distance_cm is not None:
+            active_mask = radial_distance_cm <= max_distance_cm
+            if not np.any(active_mask):
+                continue
+            displacement_active_cm = displacement_cm[active_mask]
+            radial_distance_active_cm = np.maximum(radial_distance_cm[active_mask], EPSILON)
+        else:
+            active_mask = slice(None)
+            displacement_active_cm = displacement_cm
+            radial_distance_active_cm = np.maximum(radial_distance_cm, EPSILON)
+
+        axis = dwell.axis
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm <= EPSILON:
+            axis = np.array([0.0, 0.0, 1.0])
+        else:
+            axis = axis / axis_norm
+
+        cos_theta = (displacement_active_cm @ axis) / np.maximum(radial_distance_active_cm, EPSILON)
+        theta_rad = np.arccos(np.clip(cos_theta, -1.0, 1.0))
+
+        geometry_ratio = (1 / radial_distance_active_cm**2) / (1 / tables.reference_r_cm**2)
+        radial_dose_factor = tables.gL(radial_distance_active_cm)
+        anisotropy_factor = tables.F(radial_distance_active_cm, theta_rad)
+        dose_rate_kernel = lambda_Gy_per_s_per_U * geometry_ratio * radial_dose_factor * anisotropy_factor
+        dwell_dose_Gy = (dose_rate_kernel * strength_time_U_s).astype(np.float64)
+
+        if isinstance(active_mask, slice):
+            dose_Gy += dwell_dose_Gy
+        else:
+            dose_Gy[active_mask] += dwell_dose_Gy
+
+    return dose_Gy.astype(np.float32)
 
 def dose_volume_to_image(dose_volume: np.ndarray, grid: RectilinearGrid) -> sitk.Image:
     """Convert a NumPy dose volume into a SimpleITK image using grid metadata.
