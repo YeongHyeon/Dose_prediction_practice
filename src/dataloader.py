@@ -207,7 +207,6 @@ def adjust_channel_dwells(
         for idx, dwell_idx in enumerate(indices):
             updated[dwell_idx].dwell_time_s = float(scaled[idx])
 
-    dosecal.rebuild_channels(rt_channels, updated)
     return dosecal.rebuild_channels(rt_channels, updated)
 
 def extract_peak_dose_points(
