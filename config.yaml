@@ -9,3 +9,13 @@ models:
 run:
   data-root: /mnt/d/PRV/GYN_Geneva_wo_Needles
   case: Case6
+point_a_plan:
+  prescription_dose_cgy: 600
+  n_bt: 4
+  n_ebrt: 25
+  d_ebrt_gy: 1.8
+  alpha_beta_gy: 3.0
+  eqd2_limit_gy: 85.0
+  tandem_offset_cm: 2.0
+  ovoid_surface_offset_cm: 1.0
+  ovoid_5mm_offset_cm: 1.5
