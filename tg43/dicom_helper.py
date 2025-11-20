@@ -232,8 +232,8 @@ def resample_to_spacing(
 def load_rtplan_by_channel(rtplan_path: Path | str, *, all_points: bool = False) -> Union[List[ChannelInfo], Tuple[List[ChannelInfo], Dict[str, Any]]]:
     """Parse an RTPLAN into per-channel dwell sequences with cumulative weights and strengths.
 
-    When ``all_points`` is ``True`` the function also returns auxiliary point
-    descriptors (for example DoseReferenceSequence entries such as Point A/B).
+    When ``all_points`` is ``True`` the function also returns auxiliary metadata
+    with dose reference points (e.g. Point A/B) and the RT plan description.
     """
 
     def _as_float(value: object) -> Optional[float]:
@@ -278,6 +278,8 @@ def load_rtplan_by_channel(rtplan_path: Path | str, *, all_points: bool = False)
     ds = pydicom.dcmread(str(rtplan_path))
     if ds is None:
         raise ValueError("Unable to read RTPLAN dataset")
+
+    plan_description = str(getattr(ds, "RTPlanDescription", "") or "").strip()
 
     if hasattr(ds, "BrachyApplicationSetupSequence"):
         setups = ds.BrachyApplicationSetupSequence
@@ -394,6 +396,7 @@ def load_rtplan_by_channel(rtplan_path: Path | str, *, all_points: bool = False)
 
     aux_points = {
         "dose_reference_points": _extract_reference_points(ds),
+        "rtplan_description": plan_description,
     }
     return channels, aux_points
 
