@@ -535,3 +535,49 @@ def extract_dwell_positions(ct_image: sitk.Image, channels: List[ChannelInfo], u
         positions["channel"].extend([channel.channel_number] * len(indices))
     
     return positions
+
+def extract_dwell_positions_continuous_index(
+    ct_image: sitk.Image,
+    channels: List[ChannelInfo],
+    unique: bool = False,
+):
+    """
+    Map dwell positions (cm) into *continuous* CT index coordinates (float) 
+    for accurate overlay on voxel images.
+
+    - Input dwell positions: physical position in cm (channel.positions_cm)
+    - Output "index": (i, j, k) in image index space but NOT rounded to int.
+    """
+
+    positions = {"position": [], "channel": []}
+
+    for channel in channels:
+        idx_list = []
+
+        for pos_cm in channel.positions_cm:
+            if pos_cm is None:
+                continue
+
+            try:
+                # cm -> mm
+                point_mm = tuple((pos_cm * 10.0).tolist())
+
+                # continuous index (float), no rounding
+                idx_cont = ct_image.TransformPhysicalPointToContinuousIndex(point_mm)
+                # SimpleITK returns (x, y, z) index order
+                idx_list.append(idx_cont)
+
+            except RuntimeError:
+                # point outside image
+                continue
+
+        if unique and idx_list:
+            # approximate uniqueness by rounding in index space
+            arr = np.array(idx_list)  # shape (N, 3)
+            _, unique_indices = np.unique(arr, axis=0, return_index=True)
+            idx_list = [idx_list[i] for i in sorted(unique_indices)]
+
+        positions["position"].extend(idx_list)
+        positions["channel"].extend([channel.channel_number] * len(idx_list))
+
+    return positions
