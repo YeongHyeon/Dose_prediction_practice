@@ -148,6 +148,7 @@ def embed_mask_as_structure(
     description: str | None = None,
     interpreted_type: str = "ISODOSE",
     generation_algorithm: str = "AUTOMATIC",
+    new_uids: bool = False,
 ) -> FileDataset:
     """Return a new RTSTRUCT dataset with ``mask`` appended as a ROI."""
 
@@ -217,12 +218,13 @@ def embed_mask_as_structure(
     obs_item.ROIObservationLabel = roi_name
     obs_seq.append(obs_item)
 
-    now = datetime.utcnow()
-    dataset.SOPInstanceUID = generate_uid()
-    if hasattr(dataset, "SeriesInstanceUID"):
-        dataset.SeriesInstanceUID = generate_uid()
-    dataset.InstanceCreationDate = now.strftime("%Y%m%d")
-    dataset.InstanceCreationTime = now.strftime("%H%M%S")
+    if new_uids:
+        now = datetime.utcnow()
+        dataset.SOPInstanceUID = generate_uid()
+        if hasattr(dataset, "SeriesInstanceUID"):
+            dataset.SeriesInstanceUID = generate_uid()
+        dataset.InstanceCreationDate = now.strftime("%Y%m%d")
+        dataset.InstanceCreationTime = now.strftime("%H%M%S")
 
     return dataset
 
